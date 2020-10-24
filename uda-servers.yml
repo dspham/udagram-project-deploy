@@ -2,7 +2,6 @@ Description: >
     Dennis Pham
 
 Parameters:
-
     EnvironmentName:
         Description: An Environment name that will be prefixed to resources
         Type: String
@@ -60,13 +59,13 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          sudo yum -y install httpd
-          sudo service httpd start
-          sudo yum install wget -y
-          cd /var/www/html/
-          sudo wget http://udagram.com.s3-website-us-west-2.amazonaws.com/
-          sudo mv /etc/httpd/conf.d/welcome.conf /etc/httpd/conf.d/welcome.backup
-          systemctl restart httpd
+          apt-get update -y
+          apt-get install unzip awscli -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          cd /var/www/html
+          aws s3 cp s3://udacity-demo-1/udacity.zip .
+          unzip -o udacity.zip
       ImageId: ami-005bdb005fb00e791
       SecurityGroups:
       - Ref: WebserverSecGroup
@@ -135,7 +134,6 @@ Resources:
           Fn::Sub: "${EnvironmentName}-VPCID"
 
 Outputs:
-
   WebAppLB: 
       Description: A reference to the APP's URL Link 
       Value: !Join [ "", [ "http://", !GetAtt WebAppLB.DNSName]]

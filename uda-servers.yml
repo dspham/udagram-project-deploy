@@ -3,11 +3,12 @@ Description: >
 
 Parameters:
     EnvironmentName:
-        Description: An Environment name that will be prefixed to resources
+        Description: An environment name that will be prefixed to resources
         Type: String
 
 Resources:
-  LBSecGroup:
+
+  LoadBalancerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to and from our load balancer
@@ -46,22 +47,45 @@ Resources:
         ToPort: 65535
         CidrIp: 0.0.0.0/0
 
-  S3BucketPolicy: 
-        Type: "AWS::IAM::Role"
-        Properties: 
-            RoleName:
-                !Sub ${EnvironmentName}-Role
-            AssumeRolePolicyDocument: 
-                Version: "2012-10-17"
-                Statement: 
-                - 
-                    Effect: "Allow"
-                    Principal: 
-                        Service: 
-                            - "ec2.amazonaws.com"
-                    Action: 
-                    - "sts:AssumeRole"
-            Path: "/"
+  WebAppLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install unzip awscli -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          cd /var/www/html
+          aws s3 cp s3://udacity-demo-1/udacity.zip .
+          unzip -o udacity.zip
+      ImageId: ami-07a29e5e945228fa1
+      IamInstanceProfile: !Ref RootInstanceProfile
+      SecurityGroups:
+      - Ref: WebserverSecGroup
+      InstanceType: t3.medium
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sdk"
+        Ebs:
+          VolumeSize: '10'
+
+  UdaS3ReadOnlyEC2: 
+      Type: "AWS::IAM::Role"
+      Properties: 
+          RoleName:
+              !Sub ${EnvironmentName}-Role
+          AssumeRolePolicyDocument: 
+              Version: "2012-10-17"
+              Statement: 
+              - 
+                  Effect: "Allow"
+                  Principal: 
+                      Service: 
+                          - "ec2.amazonaws.com"
+                  Action: 
+                  - "sts:AssumeRole"
+          Path: "/"
   RolePolicies: 
         Type: "AWS::IAM::Policy"
         Properties: 
@@ -79,53 +103,15 @@ Resources:
                         -   arn:aws:s3:::udacity-demo-1/*
             Roles: 
                 - 
-                    Ref: "S3BucketPolicy"
+                    Ref: "UdaS3ReadOnlyEC2"
   RootInstanceProfile: 
     Type: "AWS::IAM::InstanceProfile"
     Properties: 
         Path: "/"
         Roles: 
             - 
-                Ref: "S3BucketPolicy"
-
-  WebAppLaunchConfig:
-    Type: AWS::AutoScaling::LaunchConfiguration
-    Properties:
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          apt-get update -y
-          apt-get install unzip awscli -y
-          apt-get install apache2 -y
-          systemctl start apache2.service
-          cd /var/www/html
-          aws s3 cp s3://udacity-demo-1/udacity.zip .
-          unzip -o udacity.zip
-      ImageId: ami-07efac79022b86107
-      IamInstanceProfile: !Ref RootInstanceProfile
-      SecurityGroups:
-      - Ref: WebserverSecGroup
-      InstanceType: t3.medium
-      BlockDeviceMappings:
-      - DeviceName: "/dev/sdk"
-        Ebs:
-          VolumeSize: '10'
-  WebAppTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckEnabled: true
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      Port: 80
-      Protocol: HTTP
-      UnhealthyThresholdCount: 5
-      VpcId: 
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
-
+                Ref: "UdaS3ReadOnlyEC2"
+                    
   WebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -145,7 +131,7 @@ Resources:
       - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
       - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
       SecurityGroups:
-      - Ref: LBSecGroup
+      - Ref: LoadBalancerSecGroup
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -155,7 +141,7 @@ Resources:
           Ref: WebAppTargetGroup
       LoadBalancerArn:
         Ref: WebAppLB
-      Port: 80
+      Port: '80'
       Protocol: HTTP
   ALBListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -168,10 +154,25 @@ Resources:
         Values: [/]
       ListenerArn: !Ref 'Listener'
       Priority: 1
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${EnvironmentName}-VPCID"
 
 Outputs:
-  WebAppLB: 
-      Description: A reference to the application's URL Link 
-      Value: !Join [ "", [ "http://", !GetAtt WebAppLB.DNSName]]
-      Export:
-        Name: "DNSName-Link"
+  WebAppLB:
+    Description:  A reference to the application's DNS Name/URL Link for the Load Balancer
+    Value: !Join [ "", [ 'http://', !GetAtt WebAppLB.DNSName ]]
+    Export:
+        Name: !Sub ${EnvironmentName}-LB-DNSName

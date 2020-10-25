@@ -1,5 +1,5 @@
 Description: >
-    Dennis Pham
+    Dennis Pham | Udagram
 
 Parameters:
     EnvironmentName:
@@ -45,6 +45,49 @@ Resources:
         FromPort: 0
         ToPort: 65535
         CidrIp: 0.0.0.0/0
+
+  S3BucketPolicy: 
+        Type: "AWS::IAM::Role"
+        Properties: 
+            RoleName:
+                !Sub ${EnvironmentName}-Role
+            AssumeRolePolicyDocument: 
+                Version: "2012-10-17"
+                Statement: 
+                - 
+                    Effect: "Allow"
+                    Principal: 
+                        Service: 
+                            - "ec2.amazonaws.com"
+                    Action: 
+                    - "sts:AssumeRole"
+            Path: "/"
+  RolePolicies: 
+        Type: "AWS::IAM::Policy"
+        Properties: 
+            PolicyName: "AmazonS3ReadOnlyAccess"
+            PolicyDocument: 
+                Version: "2012-10-17"
+                Statement: 
+                - 
+                    Effect: "Allow"
+                    Action: 
+                        -   s3:Get*
+                        -   s3:List*
+                    Resource: 
+                        -   arn:aws:s3:::udacity-demo-1
+                        -   arn:aws:s3:::udacity-demo-1/*
+            Roles: 
+                - 
+                    Ref: "S3BucketPolicy"
+  RootInstanceProfile: 
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+        Path: "/"
+        Roles: 
+            - 
+                Ref: "S3BucketPolicy"
+
   WebAppLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -58,14 +101,30 @@ Resources:
           cd /var/www/html
           aws s3 cp s3://udacity-demo-1/udacity.zip .
           unzip -o udacity.zip
-      ImageId: ami-005bdb005fb00e791
+      ImageId: ami-07efac79022b86107
+      IamInstanceProfile: !Ref RootInstanceProfile
       SecurityGroups:
       - Ref: WebserverSecGroup
-      InstanceType: t3.small
+      InstanceType: t3.medium
       BlockDeviceMappings:
       - DeviceName: "/dev/sdk"
         Ebs:
           VolumeSize: '10'
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: 
+        Fn::ImportValue:
+          Fn::Sub: "${EnvironmentName}-VPCID"
 
   WebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -96,7 +155,7 @@ Resources:
           Ref: WebAppTargetGroup
       LoadBalancerArn:
         Ref: WebAppLB
-      Port: '80'
+      Port: 80
       Protocol: HTTP
   ALBListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -109,25 +168,10 @@ Resources:
         Values: [/]
       ListenerArn: !Ref 'Listener'
       Priority: 1
-  WebAppTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      HealthCheckEnabled: true
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 8
-      HealthyThresholdCount: 2
-      Port: 80
-      Protocol: HTTP
-      UnhealthyThresholdCount: 5
-      VpcId: 
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
 
 Outputs:
   WebAppLB: 
-      Description: A reference to the APP's URL Link 
+      Description: A reference to the application's URL Link 
       Value: !Join [ "", [ "http://", !GetAtt WebAppLB.DNSName]]
       Export:
         Name: "DNSName-Link"
